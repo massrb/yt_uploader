@@ -11,19 +11,27 @@ options = {}
 OptionParser.new do |opts|
   opts.banner = "Usage: script.rb [options]"
 
-  opts.on("-f FILENAME", "--file FILENAME", "Specify the filename") do |f|
+  opts.on("-f FILENAME", "--file FILENAME", "Specify source mp4 filename") do |f|
     options[:filename] = f
   end
 
-  opts.on("-p PREFIX", "--prefix PREFIX", "Specify a prefix string") do |p|
+  opts.on("-p PREFIX", "--prefix PREFIX", "Specify a prefix string for derrived segments") do |p|
     options[:prefix] = p
+  end
+
+  opts.on("-b SEGMENT", "--begin SEGMENT", "Begin at segment number SEGMENT") do |p|
+    options[:start_seg] = p
   end
 
   opts.on("-s", "--show", "Just show, don't actually run") do
     options[:show_only] = true
   end
 
-  opts.on("-v", "--video", "Convert a file to video") do
+  opts.on("-c", "--continuous", "convert segments continuoulsy") do
+    options[:continuous] = true
+  end
+
+  opts.on("-v", "--video", "Convert the next available segment file(s) to video") do
     options[:to_video] = true
   end
 
@@ -47,7 +55,8 @@ class Mp3Processor
     @to_video = options[:to_video]
 
     # process one video at a time and exit if false
-    @continuous = false 
+    @continuous = options[:continuous]
+    @start_seg = options[:start_seg]
   end
 
   def format_duration(seconds)
@@ -71,6 +80,7 @@ class Mp3Processor
       cmd = %Q(ffmpeg -f lavfi -i color=c=black:s=1280x720:d=0.1 -i "#{fpath}.mp3" ) + 
             %Q(-c:v libx264 -c:a aac -shortest -pix_fmt yuv420p "#{fpath}.mp4")
     end
+    puts "Create video from mp3 .."
     puts cmd
     system(cmd)
   end
@@ -82,6 +92,9 @@ class Mp3Processor
     end
     puts 'Upload Video ..'
     VideoUploader.new(video_path, segment).upload_video
+    if @continuous
+      File.delete(video_path)
+    end
   end
 
   def process
@@ -95,25 +108,28 @@ class Mp3Processor
       segment_length = (total_duration + (num_hours - 1) * overlap).to_f / num_hours
       puts "How many hours: #{num_hours.round(2)} seconds"
       puts "segment length:#{segment_length.round(2)}\n\n"
+      count = 0
+      seg = @start_seg&.to_i || 1
 
-      num_hours.to_i.times do |i|
-        start_time = i * (segment_length - overlap)
+      while seg <= num_hours.to_i
+        start_time = (seg - 1) * (segment_length - overlap)
         end_time = start_time + segment_length
 
         # Ensure we don't exceed the total duration on the last segment
         end_time = [end_time, total_duration].min
         duration = [segment_length, total_duration - start_time].min
 
-        puts "Segment #{i + 1}:"
+        puts "Segment #{seg}:"
         puts "  Start: #{start_time.round(2)}s"
         puts "  End:   #{end_time.round(2)}s"
         puts "  Duration: #{duration.round(2)}s"
-        filename = "#{@working_dir}/#{@prefix}_#{i + 1}"
+        filename = "#{@working_dir}/#{@prefix}_#{seg}"
         if @to_video
           if File.exist?("#{filename}.mp3")
-            to_video(filename, i+1)
+            count += 1
+            to_video(filename, seg)
             puts 'Video done ..'
-            break unless @continuous
+            break if !@continuous || count >= 3
           end
         else
           to_mp3(filename)
