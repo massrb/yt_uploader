@@ -63,9 +63,9 @@ class Mp3Processor
     Time.at(seconds).utc.strftime("%H:%M:%S")
   end
 
-  def to_mp3(fpath)
-    cmd = %Q(ffmpeg -y -i "#{@fpath}" -ss #{start_time.round(2)} ) +
-                %Q(-t #{duration.round(2)} -acodec copy "#{filename}.mp3")
+  def to_mp3(attr)
+    cmd = %Q(ffmpeg -y -i "#{@fpath}" -ss #{attr[:start_time].round(2)} ) +
+                %Q(-t #{attr[:duration].round(2)} -acodec copy "#{attr[:filename]}.mp3")
     puts cmd
     system(cmd) unless @show_only
   end
@@ -111,7 +111,7 @@ class Mp3Processor
       count = 0
       seg = @start_seg&.to_i || 1
 
-      while seg <= num_hours.to_i
+      while seg <= num_hours.ceil
         start_time = (seg - 1) * (segment_length - overlap)
         end_time = start_time + segment_length
 
@@ -130,10 +130,15 @@ class Mp3Processor
             to_video(filename, seg)
             puts 'Video done ..'
             break if !@continuous || count >= 3
+          else
+            puts "\nNo video file !"
+            break
           end
         else
-          to_mp3(filename)
+          to_mp3(filename: filename, duration: duration, start_time: start_time)
+          break if !@continuous || count >= 3
         end
+        seg += 1
         puts
       end
     end
